@@ -1,26 +1,7 @@
-// Follow this setup guide to integrate the Deno language server with your editor:
-// https://deno.land/manual/getting_started/setup_your_environment
-// This enables autocomplete, go to definition, etc.
+// supabase/functions/contact-submit/index.ts
+// Public contact submit endpoint with CORS + atomic Postgres rate limiting + server-side insert.
 
-// Setup type definitions for built-in Supabase Runtime APIs
-/**
-import "jsr:@supabase/functions-js/edge-runtime.d.ts"
-
-console.log("Hello from Functions!")
-
-Deno.serve(async (req) => {
-  const { name } = await req.json()
-  const data = {
-    message: `Hello ${name}!`,
-  }
-
-  return new Response(
-    JSON.stringify(data),
-    { headers: { "Content-Type": "application/json" } },
-  )
-})
-  */
- import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -30,9 +11,10 @@ const corsHeaders = {
 };
 
 function getIp(req: Request) {
-  // Supabase edge typically provides x-forwarded-for
+  // Supabase Edge typically provides x-forwarded-for
   const xff = req.headers.get("x-forwarded-for") || "";
-  return (xff.split(",")[0] || "").trim() || "unknown";
+  const ip = (xff.split(",")[0] || "").trim();
+  return ip || "unknown";
 }
 
 function nowIso() {
@@ -40,25 +22,42 @@ function nowIso() {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { ...corsHeaders, "content-type": "application/json" },
+    });
+  }
 
   try {
-    const SUPABASE_URL = Deno.env.get("PROJECT_SUPABASE_URL")!;
-    const SUPABASE_SECRET_KEY = Deno.env.get("PROJECT_SUPABASE_SECRET_KEY")!;
+    // IMPORTANT: Supabase CLI reserves names starting with SUPABASE_
+    // So we store secrets under custom names.
+    const PROJECT_URL = Deno.env.get("PROJECT_SUPABASE_URL");
+    const PROJECT_SECRET = Deno.env.get("PROJECT_SUPABASE_SECRET_KEY");
 
-
-    if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
-      return new Response(JSON.stringify({ error: "Missing server env vars" }), {
-        status: 500,
-        headers: { ...corsHeaders, "content-type": "application/json" },
-      });
+    if (!PROJECT_URL || !PROJECT_SECRET) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "Missing PROJECT_SUPABASE_URL / PROJECT_SUPABASE_SECRET_KEY (set via `supabase secrets set ...`)",
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "content-type": "application/json" },
+        }
+      );
     }
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY);
+    // Server-side client using secret key (bypasses RLS)
+    const supabase = createClient(PROJECT_URL, PROJECT_SECRET);
 
-    const ip = getIp(req);
-
-    const body = await req.json();
+    // Parse body
+    const body = await req.json().catch(() => ({}));
     const name = String(body?.name || "").trim();
     const email = String(body?.email || "").trim();
     const message = String(body?.message || "").trim();
@@ -70,68 +69,45 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ---- RATE LIMIT SETTINGS ----
-    // 5 requests per 10 minutes per IP
+    // Basic input sanity (not fancy; just avoids junk)
+    if (name.length > 200 || email.length > 320 || message.length > 5000) {
+      return new Response(JSON.stringify({ error: "Input too long" }), {
+        status: 400,
+        headers: { ...corsHeaders, "content-type": "application/json" },
+      });
+    }
+
+    // ---- RATE LIMIT (atomic via Postgres RPC) ----
+    // 5 requests per 10 minutes per IP per window bucket
     const limit = 5;
-    const windowMs = 10 * 60 * 1000;
+    const windowSeconds = 10 * 60;
 
-    // Use a key per IP per window start
-    const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
-    const resetAt = new Date(windowStart + windowMs).toISOString();
-    const key = `contact:${ip}:${windowStart}`;
+    const ip = getIp(req);
+    const windowBucket = Math.floor(Date.now() / (windowSeconds * 1000));
+    const key = `contact:${ip}:${windowBucket}`;
 
-    // Atomic-ish increment using upsert + select.
-    // (For portfolio traffic, this is plenty strong.)
-    const { data: row, error: upsertErr } = await supabase
-      .from("rate_limits")
-      .upsert(
-        { key, count: 1, reset_at: resetAt },
-        { onConflict: "key", ignoreDuplicates: false }
-      )
-      .select("count, reset_at")
+    const { data: rl, error: rlErr } = await supabase
+      .rpc("rate_limit_check", {
+        p_key: key,
+        p_limit: limit,
+        p_window_seconds: windowSeconds,
+      })
       .single();
 
-    if (upsertErr) {
-      // If upsert conflicts, we need to increment explicitly
-      // We'll do it with a second step update.
-      const { data: existing, error: fetchErr } = await supabase
-        .from("rate_limits")
-        .select("count, reset_at")
-        .eq("key", key)
-        .single();
+    if (rlErr) throw rlErr;
 
-      if (fetchErr) throw fetchErr;
-
-      const nextCount = (existing?.count || 0) + 1;
-
-      const { data: updated, error: updateErr } = await supabase
-        .from("rate_limits")
-        .update({ count: nextCount, reset_at: resetAt })
-        .eq("key", key)
-        .select("count, reset_at")
-        .single();
-
-      if (updateErr) throw updateErr;
-
-      if (updated.count > limit) {
-        return new Response(
-          JSON.stringify({ error: "Rate limit exceeded", reset_at: updated.reset_at }),
-          {
-            status: 429,
-            headers: { ...corsHeaders, "content-type": "application/json" },
-          }
-        );
-      }
-    } else {
-      if ((row?.count || 1) > limit) {
-        return new Response(
-          JSON.stringify({ error: "Rate limit exceeded", reset_at: row.reset_at }),
-          {
-            status: 429,
-            headers: { ...corsHeaders, "content-type": "application/json" },
-          }
-        );
-      }
+    if (!rl?.allowed) {
+      return new Response(
+        JSON.stringify({
+          error: "Rate limit exceeded",
+          count: rl?.count ?? null,
+          reset_at: rl?.reset_at ?? null,
+        }),
+        {
+          status: 429,
+          headers: { ...corsHeaders, "content-type": "application/json" },
+        }
+      );
     }
 
     // Insert message (server-side)
@@ -157,16 +133,3 @@ Deno.serve(async (req) => {
     });
   }
 });
-
-
-/* To invoke locally:
-
-  1. Run `supabase start` (see: https://supabase.com/docs/reference/cli/supabase-start)
-  2. Make an HTTP request:
-
-  curl -i --location --request POST 'http://127.0.0.1:54321/functions/v1/contact-submit' \
-    --header 'Authorization: Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6ImI4MTI2OWYxLTIxZDgtNGYyZS1iNzE5LWMyMjQwYTg0MGQ5MCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjIwODUwOTMyODZ9.6YPyalELk-2_NiVSiAMGyjQD9SY8aZho7iQ-N6iJQCOCmzhKbmVq2cHjQPpj8AlnC7o6U-ULY6CaB9KDhlRE4A' \
-    --header 'Content-Type: application/json' \
-    --data '{"name":"Functions"}'
-
-*/

@@ -16,6 +16,7 @@ import AdminLogin from "../pages/AdminLogin";
 import AdminDashboard from "../pages/AdminDashboard";
 import AdminProjects from "../pages/AdminProjects";
 import AdminProjectEdit from "../pages/AdminProjectEdit";
+import AdminMessages from "../pages/AdminMessages";
 import NotFound from "../pages/NotFound";
 
 export function createAppRouter() {
@@ -40,6 +41,14 @@ export function createAppRouter() {
           element: (
             <ProtectedRoute>
               <AdminDashboard />
+            </ProtectedRoute>
+          ),
+        },
+        {
+          path: "/admin/messages",
+          element: (
+            <ProtectedRoute>
+              <AdminMessages />
             </ProtectedRoute>
           ),
         },

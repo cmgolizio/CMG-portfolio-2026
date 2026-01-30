@@ -1,17 +1,18 @@
-// import React from "react";
-
-// // Intentionally dumb for Phase 0. We’ll swap to a real markdown renderer later.
-// export default function MarkdownRenderer({ markdown }) {
-//   return (
-//     <pre style={{ whiteSpace: "pre-wrap", lineHeight: 1.4 }}>{markdown}</pre>
-//   );
-// }
 import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+import "highlight.js/styles/github.css"; // later you can swap styles
 
 export default function MarkdownRenderer({ markdown }) {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown || ""}</ReactMarkdown>
+    <div style={{ lineHeight: 1.55 }}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlight]}
+      >
+        {markdown || ""}
+      </ReactMarkdown>
+    </div>
   );
 }

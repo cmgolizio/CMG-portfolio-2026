@@ -11,8 +11,8 @@ import About from "../pages/About";
 import Resume from "../pages/Resume";
 import Contact from "../pages/Contact";
 import Blog from "../pages/Blog";
-import Login from "../pages/Login";
 
+import AdminLogin from "../pages/AdminLogin";
 import AdminDashboard from "../pages/AdminDashboard";
 import AdminProjects from "../pages/AdminProjects";
 import AdminProjectEdit from "../pages/AdminProjectEdit";
@@ -30,8 +30,11 @@ export function createAppRouter() {
         { path: "/resume", element: <Resume /> },
         { path: "/contact", element: <Contact /> },
         { path: "/blog", element: <Blog /> },
-        { path: "/login", element: <Login /> },
 
+        // Admin login (not advertised publicly)
+        { path: "/admin/login", element: <AdminLogin /> },
+
+        // Admin (protected)
         {
           path: "/admin",
           element: (

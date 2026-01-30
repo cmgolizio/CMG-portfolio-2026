@@ -1,21 +1,26 @@
 import React from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { signInWithMagicLink } from "../services/auth";
 
-export default function Login() {
+function getNextFromQuery(search) {
+  const params = new URLSearchParams(search || "");
+  return params.get("next") || "/admin";
+}
+
+export default function AdminLogin() {
   const { user, isLoading } = useAuth();
   const [email, setEmail] = React.useState("");
   const [status, setStatus] = React.useState({ state: "idle", message: "" });
+
   const navigate = useNavigate();
   const location = useLocation();
 
   React.useEffect(() => {
     if (!isLoading && user) {
-      const from = location.state?.from || "/admin";
-      navigate(from, { replace: true });
+      navigate(getNextFromQuery(location.search), { replace: true });
     }
-  }, [user, isLoading, navigate, location.state]);
+  }, [user, isLoading, navigate, location.search]);
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -37,8 +42,10 @@ export default function Login() {
 
   return (
     <div>
-      <h1>Login</h1>
-      <p>Admin access via magic link.</p>
+      <h1>Admin access</h1>
+      <p>
+        This is for site administration only. <Link to='/'>Back to site</Link>
+      </p>
 
       <form
         onSubmit={onSubmit}
@@ -46,7 +53,7 @@ export default function Login() {
       >
         <input
           type='email'
-          placeholder='you@email.com'
+          placeholder='Admin email'
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required

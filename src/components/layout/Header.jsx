@@ -1,5 +1,5 @@
 import React from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { signOut } from "../../services/auth";
 
@@ -9,14 +9,63 @@ const navStyle = ({ isActive }) => ({
   fontWeight: isActive ? 700 : 400,
 });
 
+const ADMIN_REVEAL_KEY = "portfolio_admin_reveal";
+
+function getAdminRevealFlag() {
+  try {
+    return sessionStorage.getItem(ADMIN_REVEAL_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setAdminRevealFlag(value) {
+  try {
+    sessionStorage.setItem(ADMIN_REVEAL_KEY, value ? "1" : "0");
+  } catch {
+    // ignore
+  }
+}
+
 export default function Header() {
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const [adminRevealed, setAdminRevealed] =
+    React.useState(getAdminRevealFlag());
+
+  const onAdminPath = location.pathname.startsWith("/admin");
+
+  // Reveal admin link with Cmd+. (Mac) or Ctrl+. (Win/Linux)
+  React.useEffect(() => {
+    function onKeyDown(e) {
+      const isDot = e.key === "."; // '.' key
+      const isCombo = (e.metaKey || e.ctrlKey) && isDot;
+      if (!isCombo) return;
+
+      e.preventDefault();
+      setAdminRevealed((prev) => {
+        const next = !prev;
+        setAdminRevealFlag(next);
+        return next;
+      });
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   async function handleSignOut() {
     await signOut();
     navigate("/");
   }
+
+  // Show admin access only if:
+  // - you are signed in, OR
+  // - you're on an /admin route, OR
+  // - you toggled reveal via key combo
+  const showAdmin = !!user || onAdminPath || adminRevealed;
 
   return (
     <header
@@ -49,20 +98,19 @@ export default function Header() {
           Contact
         </NavLink>
 
-        {!isLoading && user ? (
+        {showAdmin ? (
           <>
-            <NavLink to='/admin' style={navStyle}>
+            <NavLink to={user ? "/admin" : "/admin/login"} style={navStyle}>
               Admin
             </NavLink>
-            <button onClick={handleSignOut} style={{ marginLeft: 8 }}>
-              Sign out
-            </button>
+
+            {!isLoading && user ? (
+              <button onClick={handleSignOut} style={{ marginLeft: 8 }}>
+                Sign out
+              </button>
+            ) : null}
           </>
-        ) : (
-          <NavLink to='/login' style={navStyle}>
-            Login
-          </NavLink>
-        )}
+        ) : null}
       </nav>
     </header>
   );

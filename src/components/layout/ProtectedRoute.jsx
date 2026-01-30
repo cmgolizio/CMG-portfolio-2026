@@ -7,8 +7,13 @@ export function ProtectedRoute({ children }) {
   const location = useLocation();
 
   if (isLoading) return <p>Loading…</p>;
-  if (!user)
-    return <Navigate to='/login' replace state={{ from: location.pathname }} />;
+
+  if (!user) {
+    const next = location.pathname + (location.search || "");
+    return (
+      <Navigate to={`/admin/login?next=${encodeURIComponent(next)}`} replace />
+    );
+  }
 
   return children;
 }

@@ -4,7 +4,6 @@ export async function signInWithMagicLink(email) {
   const { data, error } = await supabase.auth.signInWithOtp({
     email,
     options: {
-      // after the user clicks the magic link, they'll land here:
       emailRedirectTo: window.location.origin + "/admin",
     },
   });
